@@ -14,24 +14,26 @@ from .. import distributed
 from .. import cross_entropy_with_softmax, classification_error, parameter, \
         input_variable, times, plus, reduce_sum
         
-def create_data_parallel_distributed_trainer(quantized, warm_start):
-    return distributed.data_parallel_distributed_trainer(
+def create_data_parallel_distributed_learner(parameter_learners, quantized):
+    return distributed.data_parallel_distributed_learner(
+        parameter_learners,
         use_async_buffered_parameter_update=False,
-        num_quantization_bits=(1 if quantized else 32),
-        distributed_after=warm_start)
+        num_quantization_bits=(1 if quantized else 32))
 
-def create_block_momentum_distributed_trainer(quantized, warm_start):
-    return distributed.block_momentum_distributed_trainer(
+def create_block_momentum_distributed_learner(parameter_learners, quantized):
+    return distributed.block_momentum_distributed_learner(
+        parameter_learners,
         block_size=1024,
         distributed_after = warm_start)
 
-def create_block_momentum_distributed_trainer_with_time_constant(quantized, warm_start):
-    return distributed.block_momentum_distributed_trainer(
-        block_size=1024,
+def create_block_momentum_distributed_learner_with_time_constant(parameter_learners, quantized):
+    return distributed.block_momentum_distributed_learner(
+        parameter_learners,
+        block_size=1024,     
         block_momentum_as_time_constant=4096,
         distributed_after=warm_start)
 
-def run_distributed_trainer(tmpdir, quantized, create_func):
+def run_distributed_training(tmpdir, quantized, create_func):
 
     in1 = input_variable(shape=1)
     labels = input_variable(shape=1)
@@ -40,13 +42,11 @@ def run_distributed_trainer(tmpdir, quantized, create_func):
     ce = cross_entropy_with_softmax(z, labels)
     errs = classification_error(z, labels)
 
-    warm_start = (100 if quantized else 0)
+    momentum_time_constant = momentum_as_time_constant_schedule(1100)
+    lr_per_sample = learning_rate_schedule(0.007, UnitType.sample)
+    dist_learner = create_func([ momentum_sgd(z.parameters, lr_per_sample, momentum_time_constant) ], quantized)
 
-    dist_trainer = create_func(quantized, warm_start)
-
-    assert dist_trainer.distributed_after == warm_start
-
-    communicator = dist_trainer.communicator()
+    communicator = dist_learner.communicator()
     workers = communicator.workers()
     current_worker = communicator.current_worker()
     found_rank = False
@@ -56,11 +56,7 @@ def run_distributed_trainer(tmpdir, quantized, create_func):
 
     assert found_rank
 
-    momentum_time_constant = momentum_as_time_constant_schedule(1100)
-    lr_per_sample = learning_rate_schedule(0.007, UnitType.sample)
-    trainer = Trainer(z, ce, errs, \
-            momentum_sgd(z.parameters, lr_per_sample, momentum_time_constant),
-            distributed_trainer=dist_trainer)
+    trainer = Trainer(z, ce, errs, [ dist_learner ])
     in1_value = [[1],[2]]
     label_value = [[0], [1]]
     arguments = {in1: in1_value, labels: label_value}
@@ -78,12 +74,11 @@ def run_distributed_trainer(tmpdir, quantized, create_func):
     # Ensure that Swig is not leaking raw types
     assert isinstance(trainer.model, Function)
     assert trainer.model.__doc__
-    assert isinstance(trainer.parameter_learners[0], Learner)
 
 def test_distributed(tmpdir, is_1bit_sgd):
-    run_distributed_trainer(tmpdir, quantized=(True if is_1bit_sgd==1 else False), create_func=create_data_parallel_distributed_trainer)
+    run_distributed_training(tmpdir, quantized=(True if is_1bit_sgd==1 else False), create_func=create_data_parallel_distributed_learner)
     if is_1bit_sgd == 1:
-        run_distributed_trainer(tmpdir, True, create_func=create_block_momentum_distributed_trainer)
-        run_distributed_trainer(tmpdir, True,  create_func=create_block_momentum_distributed_trainer_with_time_constant)
+        run_distributed_training(tmpdir, True, create_func=create_block_momentum_distributed_learner)
+        run_distributed_training(tmpdir, True,  create_func=create_block_momentum_distributed_learner_with_time_constant)
     distributed.Communicator.finalize()
     

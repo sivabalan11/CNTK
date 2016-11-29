@@ -16,7 +16,7 @@ if platform.system() == 'Linux':
     ctypes.CDLL("libmpi.so.12", mode=ctypes.RTLD_GLOBAL)
 
 __doc__= '''\
-Distributed trainers manage trainers in distributed environment.
+Distributed learners manage learners in distributed environment.
 '''
 
 class WorkerDescriptor(cntk_py.DistributedWorkerDescriptor):
@@ -77,9 +77,9 @@ class Communicator(cntk_py.DistributedCommunicator):
         '''
         cntk_py.DistributedCommunicator.finalize()
         
-class DistributedTrainer(cntk_py.DistributedTrainer):
+class DistributedLearner(cntk_py.DistributedLearner):
     '''
-    A distributed trainer that handles data like gradients/momentums across multiple MPI workers
+    A distributed learner that handles data like gradients/momentums across multiple MPI workers
     '''
     
     @typemap
@@ -92,17 +92,10 @@ class DistributedTrainer(cntk_py.DistributedTrainer):
         '''
         return super().get_communicator()
         
-    @property
-    def distributed_after(self):
-        '''
-        number of samples to process, then parallelization starts
-		'''
-        return super().get_distributed_after_sample_count()
-
 @typemap
-def data_parallel_distributed_trainer(num_quantization_bits=32, distributed_after=0, use_async_buffered_parameter_update=False):
+def data_parallel_distributed_learner(parameter_learners, num_quantization_bits=32, use_async_buffered_parameter_update=False):
     '''
-    Creates a data parallel distributed trainer
+    Creates a data parallel distributed learner
 
     Args:
         num_quantization_bits (int): number of bits for quantization (1 to 32)
@@ -110,23 +103,26 @@ def data_parallel_distributed_trainer(num_quantization_bits=32, distributed_afte
         use_async_buffered_parameter_update (bool): use async buffered parameter update
 
     Returns:
-        a distributed trainer instance
+        a distributed learner instance
     '''
+    if not isinstance(parameter_learners, list):
+        parameter_learners = [parameter_learners]
+
     if (num_quantization_bits < 32):
-        return cntk_py.create_quantized_data_parallel_distributed_trainer(
+        return cntk_py.create_quantized_data_parallel_distributed_learner(
             cntk_py.quantized_mpicommunicator(True, True, num_quantization_bits),
-            use_async_buffered_parameter_update,
-            distributed_after)
+            parameter_learners,
+            use_async_buffered_parameter_update)
     else:
-        return cntk_py.create_data_parallel_distributed_trainer(
+        return cntk_py.create_data_parallel_distributed_learner(
             cntk_py.mpicommunicator(),
-            use_async_buffered_parameter_update,
-            distributed_after)
+            parameter_learners,
+            use_async_buffered_parameter_update)
             
 @typemap
-def block_momentum_distributed_trainer(block_size, block_momentum_as_time_constant=None, use_nestrov_momentum=True, reset_sgd_momentum_after_aggregation=True, block_learning_rate=1.0, distributed_after=0):
+def block_momentum_distributed_learner(parameter_learners, block_size, block_momentum_as_time_constant=None, use_nestrov_momentum=True, reset_sgd_momentum_after_aggregation=True, block_learning_rate=1.0, distributed_after=0):
     '''
-    Creates a block momentum distributed trainer
+    Creates a block momentum distributed learner
 
     Args:
         block_size (int): block size
@@ -136,22 +132,25 @@ def block_momentum_distributed_trainer(block_size, block_momentum_as_time_consta
         block_learning_rate (float): block learning rate
         distributed_after (int): number of samples after which distributed training starts
     Returns:
-        a distributed trainer instance
+        a distributed learner instance
     '''
+    if not isinstance(parameter_learners, list):
+        parameter_learners = [parameter_learners]
+
     if block_momentum_as_time_constant == None:
-        return cntk_py.create_block_momentum_distributed_trainer(
+        return cntk_py.create_block_momentum_distributed_learner(
             cntk_py.mpicommunicator(),
+            parameter_learners,
             block_size,
             use_nestrov_momentum,
             reset_sgd_momentum_after_aggregation,
-            block_learning_rate,
-            distributed_after)
+            block_learning_rate)
     else:
-        return cntk_py.create_block_momentum_distributed_trainer(
+        return cntk_py.create_block_momentum_distributed_learner(
             cntk_py.mpicommunicator(),
+            parameter_learners,
             block_size,
             block_momentum_as_time_constant,
             use_nestrov_momentum,
             reset_sgd_momentum_after_aggregation,
-            block_learning_rate,
-            distributed_after)
+            block_learning_rate)

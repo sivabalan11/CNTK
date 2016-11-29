@@ -77,6 +77,13 @@ def _verify_momentum_type(momentum):
                          'momentum_as_time_constant_schedule() function)'
                          % type(momentum))
 
+def minibatch_info(number_of_samples, at_end_of_sweep = False, at_end_of_data = False):
+   result = cntk_py.MinibatchInfo()
+   result.at_end_of_data = at_end_of_data
+   result.at_end_of_sweep = at_end_of_sweep
+   result.number_of_samples = number_of_samples
+   return result
+
 class Learner(cntk_py.Learner):
     '''
     Abstraction for learning a subset of parameters of a learnable function using first order gradient values
@@ -85,7 +92,7 @@ class Learner(cntk_py.Learner):
     To instantiate a concrete learner, use the factory methods in this module.
     '''
 
-    def update(self, gradient_values, training_sample_count):
+    def update(self, gradient_values, minibatch_info):
         '''
         Update the parameters associated with this learner.
 
@@ -99,10 +106,9 @@ class Learner(cntk_py.Learner):
             `False` to indicate that learning has stopped for all of the parameters associated with this learner
         '''
         from .utils import _create_NDArrayView_from_NumPy
-        var_nd_map = { var: _create_NDArrayView_from_NumPy(val) for var, val in
-                gradient_values.items() }
+        var_nd = [ (var, _create_NDArrayView_from_NumPy(val)) for (var, val) in gradient_values ]
 
-        return super(Learner, self).update(var_nd_map, training_sample_count)
+        return super(Learner, self).inner_update(var_nd, minibatch_info)
 
     @property
     @typemap

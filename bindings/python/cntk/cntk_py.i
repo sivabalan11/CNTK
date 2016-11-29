@@ -56,7 +56,6 @@
 %ignore CNTK::Internal::Gather;
 %ignore CNTK::Internal::Scatter;
 %ignore CNTK::Internal::Slice;
-%ignore CNTK::DistributedCommunicator::AggregateAsync;
 
 // These aren't exported from the CNTK C++ library
 %ignore CNTK::Internal::IsReversingTensorShapesInErrorMessagesEnabled;
@@ -364,6 +363,126 @@ public:
     SizeTWrapper(size_t v) : value(v) {}
 };
 %}
+
+// extending learner:
+%extend CNTK::Learner {
+    std::pair<bool, size_t> InnerUpdate(std::vector<std::pair<CNTK::Parameter, CNTK::NDArrayViewPtr>>& gradientValues, CNTK::MinibatchInfo& minibatchInfo) {
+        size_t totalSamplesSeen = 0;
+        bool result = self->Update(gradientValues, minibatchInfo, totalSamplesSeen);
+        return std::make_pair(result, totalSamplesSeen);
+    }
+}
+
+//
+// Converting Python list {pair<Parameter, NDArrayView>} to std::vector
+//
+
+%typecheck(1000) std::vector<std::pair<CNTK::Parameter, CNTK::NDArrayViewPtr>>& {
+    // '1000' is the typecheck precedence code. It means: check after basic
+    // types, but before arrays. See: http://www.swig.org/Doc1.3/Typemaps.html#Typemaps_overloading
+    $1 = PyList_Check($input) ? 1 : 0;
+}
+
+%typemap(in) std::vector<std::pair<CNTK::Parameter, CNTK::NDArrayViewPtr>>&
+    (std::vector<std::pair<CNTK::Parameter, CNTK::NDArrayViewPtr>> args_vector)
+    {
+         if (!PyList_Check($input))
+             SWIG_exception(SWIG_TypeError, "list of tuples expected.");
+
+         PyObject *item;
+         PyObject *iterator = PyObject_GetIter($input);
+         if (iterator == nullptr)
+             SWIG_exception_fail(SWIG_ValueError, "cannot convert list element to CNTK::DictionaryValue");
+
+         int errorStatus = 0;
+         while ((item = PyIter_Next(iterator)))
+         {
+             if (!PyTuple_Check(item))
+                 SWIG_exception_fail(SWIG_ValueError, "element of the list is expected to be a tuple");
+
+             PyObject* first = PyTuple_GET_ITEM(item, 0);
+             void *raw_parameter = 0;
+             errorStatus = SWIG_ConvertPtr(first, &raw_parameter, SWIGTYPE_p_CNTK__Parameter,  0);
+             if (!SWIG_IsOK(errorStatus))
+                 SWIG_exception_fail(SWIG_ArgError(res1), "cannot convert first element of a tuple to CNTK::Paramter");
+
+             CNTK::Parameter* parameter;
+             if (raw_parameter)
+                 parameter = reinterpret_cast<CNTK::Parameter*>(raw_parameter);
+             else
+                 SWIG_exception_fail(SWIG_ArgError(errorStatus), "parameter is not allowed to be null");
+
+             PyObject* second = PyTuple_GET_ITEM(item, 1);
+             void *raw_value = 0;
+             errorStatus = SWIG_ConvertPtr(second, &raw_value, SWIGTYPE_p_std__shared_ptrT_CNTK__NDArrayView_t,  0);
+             if (!SWIG_IsOK(errorStatus))
+                 SWIG_exception_fail(SWIG_ArgError(errorStatus), "cannot convert second element of a tuple to CNTK::NDArrayViewPtr");
+
+             CNTK::NDArrayViewPtr* value;
+             if (raw_value)
+                 value = reinterpret_cast<CNTK::NDArrayViewPtr*>(raw_value);
+             else
+                 value = nullptr;
+
+             args_vector.push_back(std::make_pair(*parameter, *value));
+             Py_DECREF(item);
+        }
+
+        Py_DECREF(iterator);
+
+        if (PyErr_Occurred()) {
+            SWIG_exception_fail(SWIG_ValueError, "cannot convert list of tuples to std::vector<Parameter, NDArrayViewPtr>");
+        }
+
+        $1 = &args_vector;
+    }
+
+%typemap(argout)
+    std::vector<std::pair<CNTK::Parameter, CNTK::NDArrayViewPtr>>& gradientValues
+    {
+        if (!PyList_Check($input))
+            SWIG_exception(SWIG_TypeError, "list expected");
+
+        PyObject *item;
+        PyObject *iterator = PyObject_GetIter($input);
+
+        size_t index = 0;
+        int errorStatus = 0;
+        while ((item = PyIter_Next(iterator)))
+        {
+            PyObject* parameter = PyTuple_GET_ITEM(item, 0);
+
+            PyObject* second = PyTuple_GET_ITEM(item, 1);
+            void *raw_value = 0;
+            errorStatus = SWIG_ConvertPtr(second, &raw_value, SWIGTYPE_p_std__shared_ptrT_CNTK__NDArrayView_t,  0);
+            if (!SWIG_IsOK(errorStatus))
+                SWIG_exception_fail(SWIG_ArgError(errorStatus), "cannot convert second element of a tuple to CNTK::NDArrayViewPtr");
+
+            CNTK::NDArrayViewPtr* value;
+             if (raw_value)
+                 value = reinterpret_cast<CNTK::NDArrayViewPtr*>(raw_value);
+             else
+                 value = nullptr;
+
+             auto newPointerToValue = (*$1)[index].second.get();
+             if(value->get() != newPointerToValue)
+             {
+                 CNTK::NDArrayViewPtr* v = new std::shared_ptr<CNTK::NDArrayView>((*$1)[index].second);
+                 PyObject *changedValue = SWIG_NewPointerObj(SWIG_as_voidptr(v), SWIGTYPE_p_std__shared_ptrT_CNTK__NDArrayView_t, SWIG_POINTER_OWN);
+                 PyTuple_SET_ITEM(item, 1, changedValue);
+             }
+
+             index++;
+             Py_DECREF(item);
+        }
+
+        Py_DECREF(iterator);
+
+        if (PyErr_Occurred()) {
+            SWIG_exception_fail(SWIG_ValueError, "cannot convert list of tuples to std::vector<Parameter, NDArrayViewPtr>");
+        }
+    }
+
 
 // extend constructor
 %extend CNTK::DictionaryValue {
@@ -931,10 +1050,11 @@ public:
 %shared_ptr(CNTK::NDMask)
 %shared_ptr(CNTK::BackPropState)
 %shared_ptr(CNTK::Learner)
+%shared_ptr(CNTK::CompositeLearner)
+%shared_ptr(CNTK::DistributedLearner)
 %shared_ptr(CNTK::MinibatchSource)
 %shared_ptr(CNTK::DistributedCommunicator)
 %shared_ptr(CNTK::QuantizedDistributedCommunicator)
-%shared_ptr(CNTK::DistributedTrainer)
 
 %include "CNTKLibraryInternals.h"
 %include "CNTKLibrary.h"

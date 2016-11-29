@@ -3230,6 +3230,11 @@ namespace CNTK
         ///
         double LearningRate() const override;
 
+        const std::vector<LearnerPtr>& ParameterLearners() const
+        {
+            return m_learners;
+        }
+
         virtual ~CompositeLearner() {}
 
     private:
@@ -3376,10 +3381,15 @@ namespace CNTK
         ///
         size_t PreviousMinibatchSampleCount() const { return m_prevMinibatchNumSamples; }
 
+        ///
+        /// Learners associated with this Trainer for updating the model's parameters using computed gradients.
+        ///
+        const std::vector<LearnerPtr>& ParameterLearners() const { return m_learner->ParameterLearners(); }
+
         CNTK_API ~Trainer();
 
     private:
-        Trainer(const FunctionPtr& model, const FunctionPtr& lossFunction, const FunctionPtr& evaluationFunction, LearnerPtr learner, size_t);
+        Trainer(const FunctionPtr& model, const FunctionPtr& lossFunction, const FunctionPtr& evaluationFunction, CompositeLearnerPtr learner);
 
         void ExecuteForwardBackward(
             const std::unordered_map<Variable, ValuePtr>& arguments,
@@ -3397,7 +3407,7 @@ namespace CNTK
         FunctionPtr m_aggregatedEvaluationFunction;
         Variable    m_trainingSampleCountVar;
         Variable    m_testSampleCountVar;
-        LearnerPtr  m_learner;
+        CompositeLearnerPtr  m_learner;
 
         size_t m_prevMinibatchNumSamples;
         size_t m_totalSamplesSeen;

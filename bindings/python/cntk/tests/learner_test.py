@@ -97,7 +97,9 @@ def test_learner_update():
 
     learner = sgd(res.parameters, lr=learning_rate_schedule([0.1]*50 + [0.2]*50, UnitType.sample))
     assert learner.learning_rate() == 0.1
-    x = learner.update({w: np.asarray([[2.]], dtype=np.float32)}, 100)
+
+    mb_info = minibatch_info(100)
+    x = learner.update([ (w, np.asarray([[2.]], dtype=np.float32)) ], mb_info)
     assert learner.learning_rate() == 0.2
     assert w.value < w_init
 
